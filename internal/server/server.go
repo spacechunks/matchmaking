@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
-	"time"
 
 	"buf.build/go/protovalidate"
 	protovalidatemw "github.com/grpc-ecosystem/go-grpc-middleware/v2/interceptors/protovalidate"
@@ -17,21 +16,16 @@ import (
 
 type Server struct {
 	mmv1alpha1.UnimplementedMatchmakingServiceServer
-	logger  *slog.Logger
-	cfg     Config
-	tickets *matchmaking.Store[matchmaking.Ticket]
+	logger     *slog.Logger
+	listenAddr string
+	tickets    *matchmaking.Store[matchmaking.Ticket]
 }
 
-type Config struct {
-	ListenAddr                              string
-	AllocateInstanceForPendingMatchDuration time.Duration // TODO: better name
-}
-
-func New(logger *slog.Logger, config Config, tickets *matchmaking.Store[matchmaking.Ticket]) *Server {
+func New(logger *slog.Logger, listenAddr string, tickets *matchmaking.Store[matchmaking.Ticket]) *Server {
 	return &Server{
-		logger:  logger,
-		cfg:     config,
-		tickets: tickets,
+		logger:     logger,
+		listenAddr: listenAddr,
+		tickets:    tickets,
 	}
 }
 
@@ -50,7 +44,7 @@ func (s Server) Run(ctx context.Context) error {
 
 	mmv1alpha1.RegisterMatchmakingServiceServer(grpcServer, s)
 
-	lis, err := net.Listen("tcp", s.cfg.ListenAddr)
+	lis, err := net.Listen("tcp", s.listenAddr)
 	if err != nil {
 		return fmt.Errorf("listen: %w", err)
 	}

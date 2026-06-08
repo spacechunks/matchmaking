@@ -6,18 +6,26 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/spacechunks/matchmaking/internal/matchmaking"
 	"github.com/spacechunks/matchmaking/internal/server"
 )
 
 func main() {
-	ctx, cancel := context.WithCancel(context.Background())
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	tickets := matchmaking.NewStore[matchmaking.Ticket]()
+	var (
+		ctx, cancel = context.WithCancel(context.Background())
+		logger      = slog.New(slog.NewJSONHandler(os.Stdout, nil))
+		tickets     = matchmaking.NewStore[matchmaking.Ticket]()
+		mm          = matchmaking.NewFlavorMatchMaker(
+			logger.With("component", "matchmaker"),
+			1*time.Second,
+			tickets,
+		)
+		serv = server.New(logger, ":6789", tickets)
+	)
 
-	serv := server.New(logger, server.Config{}, tickets)
-
+	go mm.Start(ctx)
 	go func() {
 		c := make(chan os.Signal, 1)
 		signal.Notify(c, syscall.SIGINT, syscall.SIGTERM)

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/spacechunks/matchmaking/internal/gameserver"
 )
 
 type MatchMaker interface {
@@ -18,7 +19,7 @@ type FlavorMatchMaker struct {
 
 	tickets *Store[Ticket]
 	matches *Store[Match]
-	//alloc   gameserver.Allocator
+	alloc   gameserver.Allocator
 
 	ticketPools    map[string]TicketPool
 	pendingMatches map[string][]string
@@ -28,14 +29,13 @@ func NewFlavorMatchMaker(
 	logger *slog.Logger,
 	matchEvalInterval time.Duration,
 	tickets *Store[Ticket],
-	matches *Store[Match],
 ) *FlavorMatchMaker {
 	return &FlavorMatchMaker{
 		logger:         logger,
 		ticker:         time.NewTicker(matchEvalInterval),
 		tickets:        tickets,
 		ticketPools:    make(map[string]TicketPool),
-		matches:        matches,
+		matches:        NewStore[Match](),
 		pendingMatches: make(map[string][]string),
 	}
 }
@@ -86,27 +86,28 @@ func (m FlavorMatchMaker) Start(ctx context.Context) {
 						"match_id", match.ID,
 					)
 
-					for _, t := range match.Tickets {
-						t.Assignment = &Assignment{
-							InstanceID: "bla",
-						}
-						m.tickets.Update(t)
+					if err := m.AllocateInstance(ctx, match); err != nil {
+						m.logger.ErrorContext(
+							ctx,
+							"failed to allocate instance",
+							"match_id", match.ID,
+							"err", err,
+						)
 					}
-
-					// TODO: match is ready, allocate server, just continue on error
-
-					// instance has allocated and associated to the assignment, so the match is no longer needed
-					m.matches.Delete(match.ID)
 					continue
 				}
 
 				if time.Now().After(match.CreatedAt.Add(20 * time.Second)) {
-					// TODO: match was not able to be completely filled for x seconds, so we allocate the game server anyways
 					m.logger.Info("pending match created")
-					// TODO: match is ready, allocate server, just continue on error
-
-					// instance has allocated and associated to the assignment, so the match is no longer needed
-					m.matches.Delete(match.ID)
+					if err := m.AllocateInstance(ctx, match); err != nil {
+						m.logger.ErrorContext(
+							ctx,
+							"failed to allocate instance",
+							"match_id", match.ID,
+							"err", err,
+						)
+					}
+					continue
 				}
 
 				containsPending := slices.ContainsFunc(m.pendingMatches[match.FlavorID], func(s string) bool {
@@ -212,6 +213,28 @@ func (m FlavorMatchMaker) match(flavor string, pool TicketPool) {
 	}
 
 	m.matches.Add(match)
+}
+
+func (m FlavorMatchMaker) AllocateInstance(ctx context.Context, match Match) error {
+	insID, err := m.alloc.AllocateInstance(ctx)
+	if err != nil {
+		return err
+	}
+
+	for _, t := range match.Tickets {
+		t.Assignment = &Assignment{
+			InstanceID: insID,
+		}
+		m.tickets.Update(t)
+	}
+
+	// instance has been allocated and associated to the tickets, so the match is no longer needed
+	m.pendingMatches[match.FlavorID] = slices.DeleteFunc(m.pendingMatches[match.FlavorID], func(matchID string) bool {
+		return match.ID == matchID
+	})
+
+	m.matches.Delete(match.ID)
+	return nil
 }
 
 func (m FlavorMatchMaker) Stop() {
