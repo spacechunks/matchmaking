@@ -23,6 +23,8 @@ var config = server.Config{
 	AllocateInstanceForPendingMatchAfter: 3 * time.Second,
 }
 
+var serverCtx, cancel = context.WithCancel(context.Background())
+
 func TestFunctional(t *testing.T) {
 	RegisterFailHandler(Fail)
 	RunSpecs(t, "Functional Suite")
@@ -32,19 +34,22 @@ var _ = BeforeSuite(func() {
 	var (
 		logger = slog.New(slog.NewTextHandler(GinkgoWriter, nil))
 		serv   = server.New(logger, config, matchmaking.NewStore[matchmaking.Ticket]())
-		ctx    = context.Background()
 	)
 
 	go func() {
-		err := serv.Run(ctx)
+		err := serv.Run(serverCtx)
 		Expect(err).NotTo(HaveOccurred())
 	}()
+})
+
+var _ = AfterSuite(func() {
+	cancel()
 })
 
 var _ = Describe("test matchmaking", func() {
 	var client mmv1alpha1.MatchmakingServiceClient
 
-	BeforeEach(func() {
+	BeforeEach(func(ctx context.Context) {
 		Eventually(func() error {
 			_, err := net.DialTimeout("tcp", "localhost:60679", 10*time.Second)
 			return err
@@ -52,14 +57,20 @@ var _ = Describe("test matchmaking", func() {
 
 		grpcClient, err := grpc.NewClient(config.ListeAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 		Expect(err).NotTo(HaveOccurred())
+
 		client = mmv1alpha1.NewMatchmakingServiceClient(grpcClient)
+
+		// remove all tickets, so we have a clean state for every test
+		_, err = client.RemoveAllTickets(ctx, &mmv1alpha1.RemoveAllTicketsRequest{})
+		Expect(err).NotTo(HaveOccurred())
 	})
 
 	It("matches two tickets of same flavor without delay", func(ctx SpecContext) {
-		flavorID := uuid.NewString()
-
-		ticket1 := createAndActivateTicket(ctx, client, flavorID, 1)
-		ticket2 := createAndActivateTicket(ctx, client, flavorID, 2)
+		var (
+			flavorID = uuid.NewString()
+			ticket1  = createAndActivateTicket(ctx, client, flavorID, 1)
+			ticket2  = createAndActivateTicket(ctx, client, flavorID, 2)
+		)
 
 		Eventually(func(g Gomega) {
 			var (
