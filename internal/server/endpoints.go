@@ -20,14 +20,22 @@ func (s Server) GetTicket(
 		return nil, status.Error(codes.NotFound, "ticket not found")
 	}
 
-	return &mmv1alpha1.GetTicketResponse{
+	ret := &mmv1alpha1.GetTicketResponse{
 		Ticket: &mmv1alpha1.Ticket{
 			Id:          t.ID,
 			FlavorId:    t.FlavorID,
 			PlayerCount: uint32(t.PlayerCount),
 			Active:      t.Active,
 		},
-	}, nil
+	}
+
+	if t.Assignment != nil {
+		ret.Ticket.Assignment = &mmv1alpha1.Assignment{
+			InstanceId: t.Assignment.InstanceID,
+		}
+	}
+
+	return ret, nil
 }
 
 func (s Server) RemoveTicket(

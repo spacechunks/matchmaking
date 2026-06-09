@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"time"
 
 	"buf.build/go/protovalidate"
 	protovalidatemw "github.com/grpc-ecosystem/go-grpc-middleware/v2/interceptors/protovalidate"
@@ -16,17 +17,23 @@ import (
 
 type Server struct {
 	mmv1alpha1.UnimplementedMatchmakingServiceServer
-	logger     *slog.Logger
-	listenAddr string
-	tickets    *matchmaking.Store[matchmaking.Ticket]
+	logger  *slog.Logger
+	cfg     Config
+	tickets *matchmaking.Store[matchmaking.Ticket]
 }
 
-func New(logger *slog.Logger, listenAddr string, tickets *matchmaking.Store[matchmaking.Ticket]) *Server {
+func New(logger *slog.Logger, config Config, tickets *matchmaking.Store[matchmaking.Ticket]) *Server {
 	return &Server{
-		logger:     logger,
-		listenAddr: listenAddr,
-		tickets:    tickets,
+		logger:  logger,
+		cfg:     config,
+		tickets: tickets,
 	}
+}
+
+type Config struct {
+	ListeAddr                            string
+	MatchInterval                        time.Duration
+	AllocateInstanceForPendingMatchAfter time.Duration
 }
 
 func (s Server) Run(ctx context.Context) error {
@@ -42,9 +49,18 @@ func (s Server) Run(ctx context.Context) error {
 		),
 	)
 
+	mm := matchmaking.NewFlavorMatchMaker(
+		s.logger.With("component", "matchmaker"),
+		s.cfg.MatchInterval,
+		s.cfg.AllocateInstanceForPendingMatchAfter,
+		s.tickets,
+	)
+
+	go mm.Start(ctx)
+
 	mmv1alpha1.RegisterMatchmakingServiceServer(grpcServer, s)
 
-	lis, err := net.Listen("tcp", s.listenAddr)
+	lis, err := net.Listen("tcp", s.cfg.ListeAddr)
 	if err != nil {
 		return fmt.Errorf("listen: %w", err)
 	}
@@ -60,5 +76,6 @@ func (s Server) Run(ctx context.Context) error {
 
 	<-cancelCtx.Done()
 	grpcServer.GracefulStop()
+	mm.Stop()
 	return nil
 }

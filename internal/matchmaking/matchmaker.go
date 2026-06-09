@@ -23,20 +23,25 @@ type FlavorMatchMaker struct {
 
 	ticketPools    map[string]TicketPool
 	pendingMatches map[string][]string
+
+	allocInstanceForPendingMatchAfter time.Duration
 }
 
 func NewFlavorMatchMaker(
 	logger *slog.Logger,
 	matchEvalInterval time.Duration,
+	allocInstanceForPendingMatchAfter time.Duration,
 	tickets *Store[Ticket],
 ) *FlavorMatchMaker {
 	return &FlavorMatchMaker{
-		logger:         logger,
-		ticker:         time.NewTicker(matchEvalInterval),
-		tickets:        tickets,
-		ticketPools:    make(map[string]TicketPool),
-		matches:        NewStore[Match](),
-		pendingMatches: make(map[string][]string),
+		logger:                            logger,
+		ticker:                            time.NewTicker(matchEvalInterval),
+		tickets:                           tickets,
+		ticketPools:                       make(map[string]TicketPool),
+		matches:                           NewStore[Match](),
+		pendingMatches:                    make(map[string][]string),
+		alloc:                             &gameserver.MockAlloc{},
+		allocInstanceForPendingMatchAfter: allocInstanceForPendingMatchAfter,
 	}
 }
 
@@ -46,6 +51,9 @@ func (m FlavorMatchMaker) Start(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-m.ticker.C:
+			// TODO: fetch latest flavor version and flavor (for min/max player counts)
+			// let the previous matched players use the last flavor version
+
 			for flavor, pool := range m.ticketPools {
 				m.match(flavor, pool)
 			}
@@ -86,7 +94,7 @@ func (m FlavorMatchMaker) Start(ctx context.Context) {
 						"match_id", match.ID,
 					)
 
-					if err := m.AllocateInstance(ctx, match); err != nil {
+					if err := m.AllocateInstanceAndAssign(ctx, match); err != nil {
 						m.logger.ErrorContext(
 							ctx,
 							"failed to allocate instance",
@@ -94,12 +102,13 @@ func (m FlavorMatchMaker) Start(ctx context.Context) {
 							"err", err,
 						)
 					}
+
 					continue
 				}
 
-				if time.Now().After(match.CreatedAt.Add(20 * time.Second)) {
+				if time.Now().After(match.CreatedAt.Add(m.allocInstanceForPendingMatchAfter)) {
 					m.logger.Info("pending match created")
-					if err := m.AllocateInstance(ctx, match); err != nil {
+					if err := m.AllocateInstanceAndAssign(ctx, match); err != nil {
 						m.logger.ErrorContext(
 							ctx,
 							"failed to allocate instance",
@@ -197,10 +206,11 @@ func (m FlavorMatchMaker) match(flavor string, pool TicketPool) {
 	defer pool.RemoveAll(matched)
 
 	match := Match{
-		ID:        uuid.NewString(),
-		Tickets:   matched,
-		FlavorID:  flavor,
-		CreatedAt: time.Now(),
+		ID:              uuid.NewString(),
+		Tickets:         matched,
+		FlavorID:        flavor,
+		CreatedAt:       time.Now(),
+		FlavorVersionID: "",
 	}
 
 	if match.PlayerCount() == 10 {
@@ -215,7 +225,7 @@ func (m FlavorMatchMaker) match(flavor string, pool TicketPool) {
 	m.matches.Add(match)
 }
 
-func (m FlavorMatchMaker) AllocateInstance(ctx context.Context, match Match) error {
+func (m FlavorMatchMaker) AllocateInstanceAndAssign(ctx context.Context, match Match) error {
 	insID, err := m.alloc.AllocateInstance(ctx)
 	if err != nil {
 		return err

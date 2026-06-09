@@ -20,6 +20,11 @@ message Ticket {
     string flavor_id = 2;
     uint32 player_count = 3;
     bool active = 4;
+    Assignment assignment = 5;
+}
+
+message Assignment {
+    string instance_id = 1;
 }
 
 message SearchMatchRequest {
