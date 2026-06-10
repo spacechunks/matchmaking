@@ -195,7 +195,7 @@ func (m FlavorMatchMaker) match(flavor string, pool TicketPool) {
 
 	matched := pool.FindTickets(10)
 
-	if matched.PlayerCount() < 2 {
+	if matched.PlayerCount() < 3 {
 		logger.Info(
 			"sum of matched players below minimum required",
 			"match_len", matched.PlayerCount(),
