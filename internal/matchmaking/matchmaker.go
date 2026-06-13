@@ -142,12 +142,6 @@ func (m FlavorMatchMaker) generateMatches(flavorID string, version *chunkv1alpha
 		return
 	}
 
-	// forget above
-	// deal with this on the client side => if player wants  to join party => leave queue, remove ticket from pool
-	// if instance does not start => put tickets into pool
-	// if players leave or join while instance creation => invalidate match and put tickets into pool again
-	// whats the worst thing that could happen with this approach => player leaves/joins party during server creation
-	// => match gets invalidated all tickets, go back into pool, server will still be created and is a zombie.
 	logger := m.logger.With("flavor_id", flavorID)
 
 	pending := m.pendingMatches[flavorID]
