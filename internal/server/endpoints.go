@@ -81,7 +81,6 @@ func (s Server) CreateTicket(
 			Status:      matchmaking.TicketStatusInactive,
 		},
 	}, nil
-
 }
 
 func (s Server) ActivateTicket(

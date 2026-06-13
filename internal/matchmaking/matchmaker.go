@@ -155,7 +155,7 @@ func (m FlavorMatchMaker) generateMatches(flavorID string, version *chunkv1alpha
 
 		if match.PlayerCount() == maxPlayers {
 			match.Full = true
-			slices.DeleteFunc(m.pendingMatches[flavorID], func(s string) bool {
+			m.pendingMatches[flavorID] = slices.DeleteFunc(m.pendingMatches[flavorID], func(s string) bool {
 				return s == match.ID
 			})
 		}
@@ -304,7 +304,10 @@ func (m FlavorMatchMaker) Stop() {
 	m.ticker.Stop()
 }
 
-func (m FlavorMatchMaker) findPlayableFlavorVersion(ctx context.Context, flavorID string) (*chunkv1alpha1.FlavorVersion, error) {
+func (m FlavorMatchMaker) findPlayableFlavorVersion(
+	ctx context.Context,
+	flavorID string,
+) (*chunkv1alpha1.FlavorVersion, error) {
 	resp, err := m.chunkClient.GetFlavor(ctx, &chunkv1alpha1.GetFlavorRequest{
 		Id: flavorID,
 	})

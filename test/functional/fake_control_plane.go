@@ -47,8 +47,11 @@ func (f FakeControlPlane) Run(ctx context.Context) error {
 	return nil
 }
 
-func (f FakeControlPlane) GetFlavor(ctx context.Context, request *chunkv1alpha1.GetFlavorRequest) (*chunkv1alpha1.GetFlavorResponse, error) {
-	flavor, ok := f.flavors[request.Id]
+func (f FakeControlPlane) GetFlavor(
+	ctx context.Context,
+	req *chunkv1alpha1.GetFlavorRequest,
+) (*chunkv1alpha1.GetFlavorResponse, error) {
+	flavor, ok := f.flavors[req.Id]
 	if !ok {
 		return nil, status.Error(codes.NotFound, "not found")
 	}
@@ -58,7 +61,10 @@ func (f FakeControlPlane) GetFlavor(ctx context.Context, request *chunkv1alpha1.
 	}, nil
 }
 
-func (f FakeControlPlane) RunFlavorVersion(ctx context.Context, request *instancev1alpha1.RunFlavorVersionRequest) (*instancev1alpha1.RunFlavorVersionResponse, error) {
+func (f FakeControlPlane) RunFlavorVersion(
+	_ context.Context,
+	_ *instancev1alpha1.RunFlavorVersionRequest,
+) (*instancev1alpha1.RunFlavorVersionResponse, error) {
 	return &instancev1alpha1.RunFlavorVersionResponse{
 		Instance: &instancev1alpha1.Instance{
 			Id: uuid.NewString(),

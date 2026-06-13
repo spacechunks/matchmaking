@@ -1,0 +1,52 @@
+version: "2"
+linters:
+  default: none
+  enable:
+    - bodyclose
+    - exhaustive
+    - gomodguard_v2
+    - govet
+    - ineffassign
+    - lll
+    - misspell
+    - rowserrcheck
+    - staticcheck
+    - unparam
+    - unused
+    - whitespace
+  settings:
+    exhaustive:
+      default-signifies-exhaustive: true
+    lll:
+      line-length: 120
+    misspell:
+      mode: restricted
+      locale: US
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+      - vendor$
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    gofmt:
+      rewrite-rules:
+        - pattern: interface{}
+          replacement: any
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+      - vendor$

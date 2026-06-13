@@ -5,3 +5,7 @@ proto:
 .PHONY: functests
 functests:
 	go run github.com/onsi/ginkgo/v2/ginkgo run -v -p $(ARGS) ./test/functional
+
+.PHONY: lint
+lint:
+	golangci-lint run -v
