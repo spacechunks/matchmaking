@@ -1,4 +1,4 @@
-name: test-functional-database
+name: test-functional
 on:
   pull_request:
 permissions:
