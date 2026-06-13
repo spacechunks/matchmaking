@@ -33,11 +33,11 @@ func New(logger *slog.Logger, config Config, tickets *matchmaking.Store[matchmak
 }
 
 type Config struct {
-	ListeAddr                            string
-	ControlPlaneAddr                     string
-	MatchInterval                        time.Duration
-	AllocateInstanceForPendingMatchAfter time.Duration
-	RemoveInactiveTicketsAfter           time.Duration
+	ListeAddr                            string        `mapstructure:"listen_addr"`
+	ControlPlaneAddr                     string        `mapstructure:"control_plane_addr"`
+	MatchInterval                        time.Duration `mapstructure:"match_interval"`
+	AllocateInstanceForPendingMatchAfter time.Duration `mapstructure:"allocate_instance_for_pending_match_after"`
+	RemoveInactiveTicketsAfter           time.Duration `mapstructure:"remove_inactive_tickets_after"`
 }
 
 func (s Server) Run(ctx context.Context) error {

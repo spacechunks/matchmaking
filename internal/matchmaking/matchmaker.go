@@ -11,7 +11,6 @@ import (
 	"github.com/google/uuid"
 	chunkv1alpha1 "github.com/spacechunks/explorer/api/chunk/v1alpha1"
 	instancev1alpha1 "github.com/spacechunks/explorer/api/instance/v1alpha1"
-	"github.com/spacechunks/matchmaking/internal/gameserver"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -27,7 +26,6 @@ type FlavorMatchMaker struct {
 
 	tickets *Store[Ticket]
 	matches *Store[Match]
-	alloc   gameserver.Allocator
 
 	ticketPools    map[string]TicketPool
 	pendingMatches map[string][]string
