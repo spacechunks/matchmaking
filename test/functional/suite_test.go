@@ -94,7 +94,6 @@ func TestFunctional(t *testing.T) {
 
 var _ = Describe("matchmaking", func() {
 	var client mmv1alpha1.MatchmakingServiceClient
-	//serverCtx, serverCancel := context.WithCancel(context.Background())
 	serverCtx := context.Background()
 
 	BeforeEach(func(ctx context.Context) {

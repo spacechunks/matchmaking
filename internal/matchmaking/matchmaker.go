@@ -168,7 +168,7 @@ func (m FlavorMatchMaker) generateMatches(flavorID string, version *chunkv1alpha
 	if matched.PlayerCount() < version.MinPlayers {
 		logger.Info(
 			"sum of matched players below minimum required",
-			"match_len", matched.PlayerCount(),
+			"tickets", matched,
 		)
 		return
 	}
@@ -207,7 +207,15 @@ func (m FlavorMatchMaker) generateMatches(flavorID string, version *chunkv1alpha
 
 func (m FlavorMatchMaker) checkAndDeployMatches(ctx context.Context) {
 	for _, match := range m.matches.View() {
-		m.logger.Info("match", "match_id", match.ID, "flavor", match.FlavorID, "tickets", len(match.Tickets))
+		logger := m.logger.With(
+			"match_id", match.ID,
+			"tickets", match.Tickets,
+			"flavor_id", match.FlavorID,
+			"flavor_version_id", match.FlavorVersion.Id,
+		)
+
+		logger.Info("found match")
+
 		var (
 			invalidated []Ticket
 			valid       []Ticket
@@ -230,7 +238,7 @@ func (m FlavorMatchMaker) checkAndDeployMatches(ctx context.Context) {
 				m.tickets.Update(t)
 			}
 
-			m.logger.Info("match has invalidated tickets, removing match", "match_id", match)
+			logger.Info("match has invalidated tickets, removing match", "match_id", match)
 			m.matches.Delete(match.ID)
 			continue
 		}
@@ -238,18 +246,10 @@ func (m FlavorMatchMaker) checkAndDeployMatches(ctx context.Context) {
 		// all tickets in our match are still valid
 
 		if match.Full {
-			m.logger.Info(
-				"creating instance and assignment",
-				"match_id", match.ID,
-			)
+			logger.Info("creating instance and assignment")
 
 			if err := m.AllocateInstanceAndAssign(ctx, match); err != nil {
-				m.logger.ErrorContext(
-					ctx,
-					"failed to allocate instance",
-					"match_id", match.ID,
-					"err", err,
-				)
+				logger.ErrorContext(ctx, "failed to allocate instance", "err", err)
 			}
 
 			continue
@@ -258,12 +258,7 @@ func (m FlavorMatchMaker) checkAndDeployMatches(ctx context.Context) {
 		if time.Now().After(match.CreatedAt.Add(m.allocInstanceForPendingMatchAfter)) {
 			m.logger.Info("pending match created")
 			if err := m.AllocateInstanceAndAssign(ctx, match); err != nil {
-				m.logger.ErrorContext(
-					ctx,
-					"failed to allocate instance",
-					"match_id", match.ID,
-					"err", err,
-				)
+				logger.ErrorContext(ctx, "failed to allocate instance", "err", err)
 			}
 			continue
 		}

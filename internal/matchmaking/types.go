@@ -1,6 +1,7 @@
 package matchmaking
 
 import (
+	"log/slog"
 	"time"
 
 	chunkv1alpha1 "github.com/spacechunks/explorer/api/chunk/v1alpha1"
@@ -59,4 +60,13 @@ func (l TicketList) PlayerCount() uint32 {
 		sum += ticket.PlayerCount
 	}
 	return sum
+}
+
+func (l TicketList) LogValue() slog.Value {
+	ids := make([]string, 0, len(l))
+	for _, t := range l {
+		ids = append(ids, t.ID)
+	}
+
+	return slog.AnyValue(ids)
 }
