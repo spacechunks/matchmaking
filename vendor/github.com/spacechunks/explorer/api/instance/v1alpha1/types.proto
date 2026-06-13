@@ -1,0 +1,83 @@
+/*
+ Chunk Explorer, a platform for hosting and discovering Minecraft servers.
+ Copyright (C) 2025 Yannic Rieger <oss@76k.io>
+
+ This program is free software; you can redistribute it and/or
+ modify it under the terms of the GNU Lesser General Public
+ License as published by the Free Software Foundation; either
+ version 3 of the License, or (at your option) any later version.
+
+ This program is distributed in the hope that it will be useful,
+ but WITHOUT ANY WARRANTY; without even the implied warranty of
+ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ Lesser General Public License for more details.
+
+ You should have received a copy of the GNU Lesser General Public License
+ along with this program; if not, write to the Free Software Foundation,
+ Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+*/
+
+syntax = "proto3";
+
+package instance.v1alpha1;
+
+option go_package = "github.com/spacechunks/explorer/api/instance/v1alpha1";
+option java_package = "chunks.space.api.explorer.instance.v1alpha1";
+
+import "chunk/v1alpha1/types.proto";
+import "user/v1alpha1/types.proto";
+import "google/protobuf/timestamp.proto";
+import "buf/validate/validate.proto";
+
+
+enum InstanceState {
+  PENDING = 0;
+  CREATING = 1;
+  RUNNING = 2;
+  DELETING = 3;
+  DELETED = 4;
+  CREATION_FAILED = 5;
+}
+
+// Instance defines a running replica of a specific chunk flavor.
+//
+// We differentiate between Chunks and Instances. Chunks define the
+// configuration and provide metadata, like a name, description tags
+// and so on, that describe the experience the user can expect when
+// attempting to run the chunk. Instances on the other hand, are a
+// running replica of a particular Chunk flavor. This means that
+// there can be multiple replicas of a chunk flavor by different
+// users.
+message Instance {
+  string id = 1;
+
+  chunk.v1alpha1.Chunk chunk = 2;
+
+  chunk.v1alpha1.FlavorVersion flavor_version = 3;
+
+  string ip = 4;
+
+  uint32 port = 5;
+
+  InstanceState state = 6;
+
+  // the owner of the instance is the user that issued the api call
+  // to create it. they have full control over what happens with
+  // the instance.
+  user.v1alpha1.User owner = 7;
+
+  // contains an opaque identifier representing the player
+  // that ordered the creation this instance. ordered_by and
+  // owner of the instance are not necessarily the same.
+  string ordered_by = 8;
+
+  chunk.v1alpha1.Flavor flavor = 9;
+}
+
+message InstanceStatusReport {
+  string instance_id = 1;
+
+  uint32 port = 2;
+
+  InstanceState state = 3;
+}

@@ -1,0 +1,358 @@
+/*
+ Chunk Explorer, a platform for hosting and discovering Minecraft servers.
+ Copyright (C) 2025 Yannic Rieger <oss@76k.io>
+
+ This program is free software; you can redistribute it and/or
+ modify it under the terms of the GNU Lesser General Public
+ License as published by the Free Software Foundation; either
+ version 3 of the License, or (at your option) any later version.
+
+ This program is distributed in the hope that it will be useful,
+ but WITHOUT ANY WARRANTY; without even the implied warranty of
+ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ Lesser General Public License for more details.
+
+ You should have received a copy of the GNU Lesser General Public License
+ along with this program; if not, write to the Free Software Foundation,
+ Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+*/
+
+syntax = "proto3";
+
+package chunk.v1alpha1;
+
+option go_package = "github.com/spacechunks/explorer/api/chunk/v1alpha1";
+option java_package = "chunks.space.api.explorer.chunk.v1alpha1";
+
+import "chunk/v1alpha1/types.proto";
+import "buf/validate/validate.proto";
+
+// ChunkService provides the public api for interacting with Chunks
+// and flavors of Chunks.
+service ChunkService {
+  // CreateChunk creates a new chunk without any flavors.
+  // chunks that do not have any flavors will be deleted
+  // after some time.
+  //
+  // Defined error codes:
+  // - INVALID_ARGUMENT:
+  //   - name is invalid. names cannot start or end with a
+  //     space, underscore or slash. they cannot contain linux
+  //     path operators (.. or ../ or /).
+  //   - too many tags have been provided
+  //   - tag is invalid. "tags can only contain lower-case ascii letters,
+  //     numbers and dashes. dashes cannot be at the start or beginning of
+  //     the tag.
+  //   - name exceeds the maximum amount of allowed chars
+  //   - description exceeds the maximum amount of allowed chars.
+  rpc CreateChunk(CreateChunkRequest) returns (CreateChunkResponse);
+
+  // GetChunk returns the chunk specified by the provided id.
+  //
+  // Defined error codes:
+  // - NOT_FOUND:
+  //   - chunk with the provided id does not exist
+  // - INVALID_ARGUMENT:
+  //   - id is invalid
+  rpc GetChunk(GetChunkRequest) returns (GetChunkResponse);
+
+  // UpdateChunk updates the fields of the given chunk.
+  // Note that tags will be completely replaced with the
+  // provided ones.
+  //
+  // Defined error codes:
+  // - NOT_FOUND:
+  //   - chunk with the provided id does not exist or is deleted
+  // - INVALID_ARGUMENT:
+  //   - chunk id is invalid
+  //   - name is invalid. names cannot start or end with a space,
+  //     underscore or slash. they cannot contain linux path
+  //     operators (.. or ../ or /).
+  //   - too many tags have been provided
+  //   - tag is invalid. "tags can only contain lower-case ascii letters,
+  //     numbers and dashes. dashes cannot be at the start or beginning of
+  //     the tag.
+  //   - name exceeds the maximum amount of allowed chars
+  //   - description exceeds the maximum amount of allowed chars.
+  rpc UpdateChunk(UpdateChunkRequest) returns (UpdateChunkResponse);
+
+  // ListChunks lists all available Chunks.
+  rpc ListChunks(ListChunksRequest) returns (ListChunksResponse);
+
+  // CreateFlavor creates a new flavor for a given chunk.
+  //
+  // Defined error codes:
+  // - ALREADY_EXISTS:
+  //   - a flavor with the given name already exists for this chunk.
+  //     this error will also be returned if the flavor is currently
+  //     in the process of being deleted.
+  // - INVALID_ARGUMENT:
+  //   - the provided chunk id is invalid
+  //   - the provided flavor name is invalid. names cannot start or end
+  //     with a space, underscore or slash. they cannot contain linux path
+  //     operators (.. or ../ or /).
+  rpc CreateFlavor(CreateFlavorRequest) returns (CreateFlavorResponse);
+
+  // CreateFlavorVersion creates a new flavor version for a
+  // given flavor by determining the added, changed and removed
+  // files. it also prevents version duplicates, meaning either
+  // version numbers or the provided set of files match with
+  // an already existing version.
+  //
+  // Defined error codes:
+  // - NOT_FOUND
+  //   - the affected flavor does not exist
+  // - ALREADY_EXISTS:
+  //   - the flavor version about to be created is already present
+  //   - a version with the exact same set of files already exists
+  // - INVALID_ARGUMENT:
+  //   - the version is invalid. versions cannot start or end with a space,
+  //     underscore or slash. they cannot contain linux path operators (.. or ../ or /)
+  // - FAILED_PRECONDITION:
+  //   - the provided version hash does not match with the provided file hashes
+  rpc CreateFlavorVersion(CreateFlavorVersionRequest) returns (CreateFlavorVersionResponse);
+
+  // BuildFlavorVersion will initiate the process for building a checkpoint image.
+  // there are multiple steps involved. Calling this endpoint multiple times will
+  // have no effect, if the build process is ongoing. Build status can be retrieved
+  // by getting the flavor version.
+  //
+  // Defined error codes:
+  // - FAILED_PRECONDITION:
+  //   - the flavor version files have not been uploaded yet.
+  rpc BuildFlavorVersion(BuildFlavorVersionRequest) returns (BuildFlavorVersionResponse);
+
+  // GetUploadURL returns a presigned URL for use with a S3 client. If the expiry date
+  // is reached the client can call this endpoint again and will receive a new valid
+  // URL. Calling this endpoint multiple without the expiry date being reached will
+  // lead to the same URL being returned.
+  //
+  // Defined error codes:
+  // - NOT_FOUND:
+  //   - the targeted flavor version does not exist
+  // - ALREADY_EXISTS:
+  //   - the tarball has already been uploaded
+  // - INVALID_ARGUMENT:
+  //   - the provided flavor version id is invalid
+  //   - the provided tarball hash is empty or does not meet the requirements.
+  //     for more information about what requirements are expected see tarball_hash
+  //     documentation of GetUploadURLRequest
+  rpc GetUploadURL(GetUploadURLRequest) returns (GetUploadURLResponse);
+
+  rpc GetSupportedMinecraftVersions(GetSupportedMinecraftVersionsRequest) returns (GetSupportedMinecraftVersionsResponse);
+
+  // UploadThumbnail uploads the given PNG image. Formats other than PNG are not supported.
+  //
+  // Defined error codes:
+  // - NOT_FOUND:
+  //   - the targeted chunk does not exist
+  // - INVALID_ARGUMENT:
+  //   - chunk id is invalid
+  //   - thumbnail image must be PNG
+  //   - thumbnail size must be 512x512 pixels
+  //   - thumbnail size too big
+  rpc UploadThumbnail(UploadThumbnailRequest) returns (UploadThumbnailResponse);
+
+  // DeleteFlavor initiates the process for a Flavor to be deleted. Deletion does not happen
+  // instantaneously, it can take a few minutes for a Flavor to be fully deleted. During this
+  // time any interaction with the flavor is blocked. This means that updates are no longer
+  // possible and creating Instances based on the Flavors versions is also not possible.
+  //
+  // Defined error codes:
+  // - INVALID_ARGUMENT:
+  //   - flavor id is invalid
+  rpc DeleteFlavor(DeleteFlavorRequest) returns (DeleteFlavorResponse);
+
+  // DeleteChunk initiates the process for a Chunk to be deleted. This will also delete all
+  // Flavors associated with this Chunk. Deletion does not happen instantaneously, it can take
+  // a few minutes for a Chunk to be fully deleted. During this time any interaction with the
+  // Chunk and its Flavors is blocked. This means that updates are no longer possible and creating
+  // Instances based on the Flavors versions is also not possible.
+  //
+  // Defined error codes:
+  // - NOT_FOUND:
+  //   - the targeted chunk does not exist
+  // - INVALID_ARGUMENT:
+  //   - chunk id is invalid
+  rpc DeleteChunk(DeleteChunkRequest) returns (DeleteChunkResponse);
+
+  // GetFlavor returns the flavor specified by the provided id. Note that the file hashes of flavor
+  // versions are not being populated as of now.
+  // Defined error codes:
+  // - NOT_FOUND:
+  //   - the targeted flavor does not exist
+  rpc GetFlavor(GetFlavorRequest) returns (GetFlavorResponse);
+}
+
+message CreateChunkRequest {
+  // Name of the chunk. can be up to 50 chars.
+  string name = 1 [
+    (buf.validate.field).string.min_len = 1,
+    (buf.validate.field).string.max_len = 50,
+    (buf.validate.field).cel = {
+      id: "name.sanitization",
+      message: "names cannot start or end with a space, underscore or slash. they cannot contain linux path operators (.. or ../ or /)",
+      expression: "!this.matches('^[._ /]') && !this.matches('[._ /]$') && !this.matches('[/]')",
+    }
+  ];
+
+  // Description briefly describes what the user can
+  // expect when running the Chunk. can be up to 100
+  // chars.
+  string description = 2 [(buf.validate.field).string.max_len = 100];
+
+  // Tags categorize the chunk. Possible values could
+  // be: pvp, adventure, single-player
+  // Note that the limit is currently 4.
+  repeated string tags = 3 [
+    (buf.validate.field).repeated.max_items = 4,
+    (buf.validate.field).cel = {
+      id: "tags.sanitization",
+      message: "tags can only contain lower-case ascii letters, numbers and dashes. dashes cannot be at the start or beginning of the tag",
+      expression: "this.all(tag, tag.matches('^[a-z0-9]([a-z0-9-]*[a-z0-9])?$'))",
+    }
+  ];
+}
+
+message CreateChunkResponse {
+  Chunk chunk = 1;
+}
+
+message GetChunkRequest {
+  string id = 1 [(buf.validate.field).string.uuid = true];
+}
+
+message GetChunkResponse {
+  Chunk chunk = 1;
+}
+
+message UpdateChunkRequest {
+  string id = 1 [(buf.validate.field).string.uuid = true];
+  string name = 2 [
+    (buf.validate.field).string.max_len = 50,
+    (buf.validate.field).cel = {
+      id: "name.sanitization",
+      message: "names cannot start or end with a space, underscore or slash. they cannot contain linux path operators (.. or ../ or /)",
+      expression: "!this.matches('^[._ /]') && !this.matches('[._ /]$') && !this.matches('[/]')",
+    }
+  ];
+  string description = 3 [(buf.validate.field).string.max_len = 100];
+  repeated string tags = 4 [
+    (buf.validate.field).repeated.max_items = 4,
+    (buf.validate.field).cel = {
+      id: "tags.sanitization",
+      message: "tags can only contain lower-case ascii letters, numbers and dashes. dashes cannot be at the start or beginning of the tag",
+      expression: "this.all(tag, tag.matches('^[a-z0-9]([a-z0-9-]*[a-z0-9])?$'))",
+    }
+  ];
+}
+
+message UpdateChunkResponse {
+  Chunk chunk = 1;
+}
+
+message ListChunksRequest {
+  uint32 page_size = 1;
+  string page_token = 2;
+}
+
+message ListChunksResponse {
+  repeated Chunk chunks = 1;
+  string next_page_token = 2;
+}
+
+message CreateFlavorRequest {
+  string chunk_id = 1 [(buf.validate.field).string.uuid = true];
+  string name = 2 [
+    (buf.validate.field).string.max_len = 25,
+    (buf.validate.field).cel = {
+      id: "name.sanitization",
+      message: "names cannot start or end with a space, underscore or slash. they cannot contain linux path operators (.. or ../ or /)",
+      expression: "!this.matches('^[._ /]') && !this.matches('[._ /]$') && !this.matches('[/]')",
+    }
+  ];
+}
+
+message CreateFlavorResponse {
+  Flavor flavor = 1;
+}
+
+message CreateFlavorVersionRequest {
+  string flavor_id = 1 [(buf.validate.field).string.uuid = true];
+  string version = 2 [(buf.validate.field).cel = {
+    id: "version.sanitization",
+    message: "version cannot start or end with a space, underscore or slash. they cannot contain linux path operators (.. or ../ or /)",
+    expression: "!this.matches('^[._ /]') && !this.matches('[._ /]$') && !this.matches('[/]')",
+  }];
+  string hash = 3;
+  repeated FileHashes file_hashes = 4;
+  string minecraft_version = 5;
+  uint32 minPlayers = 6 [(buf.validate.field).uint32.gt = 0];
+  uint32 maxPlayers = 7 [(buf.validate.field).uint32.gt = 0];
+}
+
+message CreateFlavorVersionResponse {
+  FlavorVersion version = 1;
+  repeated FileHashes changed_files = 2;
+  repeated FileHashes removed_files = 3;
+  repeated FileHashes added_files = 4;
+}
+
+message BuildFlavorVersionRequest {
+  string flavor_version_id = 1 [(buf.validate.field).string.uuid = true];
+}
+
+message BuildFlavorVersionResponse {
+}
+
+message GetUploadURLRequest {
+  string flavor_version_id = 1 [(buf.validate.field).string.uuid = true];
+
+  // tarball_hash is the base64 encoded, 256-bit SHA256 digest of the tarball
+  string tarball_hash = 2 [(buf.validate.field).string.min_len = 1];
+
+  uint64 tarball_size_bytes = 3;
+}
+
+message GetUploadURLResponse {
+  string url = 1;
+}
+
+message GetSupportedMinecraftVersionsRequest {
+}
+
+message GetSupportedMinecraftVersionsResponse {
+  repeated string versions = 1;
+}
+
+message UploadThumbnailRequest {
+  string chunk_id = 1 [(buf.validate.field).string.uuid = true];
+
+  // image is the raw image bytes
+  bytes image = 2;
+}
+
+message UploadThumbnailResponse {
+}
+
+message DeleteFlavorRequest {
+  string id = 1 [(buf.validate.field).string.uuid = true];
+}
+
+message DeleteFlavorResponse {
+}
+
+message DeleteChunkRequest {
+  string id = 1 [(buf.validate.field).string.uuid = true];
+}
+
+message DeleteChunkResponse {
+}
+
+message GetFlavorRequest {
+  string id = 1 [(buf.validate.field).string.uuid = true];
+}
+
+message GetFlavorResponse {
+  Flavor flavor = 1;
+}
