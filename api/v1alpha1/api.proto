@@ -15,11 +15,17 @@ service MatchmakingService {
     rpc ActivateTicket(ActivateTicketRequest) returns (ActivateTicketResponse);
 }
 
+enum TicketStatus {
+    INACTIVE = 0;
+    ACTIVE = 1;
+    NO_PLAYABLE_FLAVOR_VERSION = 2;
+}
+
 message Ticket {
     string id = 1;
     string flavor_id = 2;
     uint32 player_count = 3;
-    bool active = 4;
+    TicketStatus status = 4;
     Assignment assignment = 5;
 }
 
