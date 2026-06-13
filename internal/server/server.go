@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"log/slog"
 	"net"
@@ -14,7 +15,9 @@ import (
 	mmv1alpha1 "github.com/spacechunks/matchmaking/api/v1alpha1"
 	"github.com/spacechunks/matchmaking/internal/matchmaking"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
 )
 
 type Server struct {
@@ -34,7 +37,9 @@ func New(logger *slog.Logger, config Config, tickets *matchmaking.Store[matchmak
 
 type Config struct {
 	ListeAddr                            string        `mapstructure:"listen_addr"`
-	ControlPlaneAddr                     string        `mapstructure:"control_plane_addr"`
+	ControlPlaneAddr                     string        `mapstructure:"control_plane_endpoint"`
+	ControlPlaneTLSEnabled               bool          `mapstructure:"control_plane_tls_enabled"`
+	ControlPlaneAPIToken                 string        `mapstructure:"control_plane_api_token"`
 	MatchInterval                        time.Duration `mapstructure:"match_interval"`
 	AllocateInstanceForPendingMatchAfter time.Duration `mapstructure:"allocate_instance_for_pending_match_after"`
 	RemoveInactiveTicketsAfter           time.Duration `mapstructure:"remove_inactive_tickets_after"`
@@ -53,7 +58,28 @@ func (s Server) Run(ctx context.Context) error {
 		),
 	)
 
-	conn, err := grpc.NewClient(s.cfg.ControlPlaneAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	creds := insecure.NewCredentials()
+	if s.cfg.ControlPlaneTLSEnabled {
+		creds = credentials.NewTLS(&tls.Config{})
+	}
+
+	conn, err := grpc.NewClient(
+		s.cfg.ControlPlaneAddr,
+		grpc.WithTransportCredentials(creds),
+		grpc.WithUnaryInterceptor(func(
+			ctx context.Context,
+			method string,
+			req any,
+			reply any,
+			cc *grpc.ClientConn,
+			invoker grpc.UnaryInvoker,
+			opts ...grpc.CallOption,
+		) error {
+			md := metadata.Pairs("authorization", s.cfg.ControlPlaneAPIToken)
+			ctx = metadata.NewOutgoingContext(ctx, md)
+			return invoker(ctx, method, req, reply, cc, opts...)
+		}),
+	)
 	if err != nil {
 		return fmt.Errorf("create grpc client: %w", err)
 	}
