@@ -30,6 +30,5 @@ jobs:
         uses: docker/build-push-action@v7
         with:
           context: .
-          file: build/controlplane.dockerfile
           push: true
           tags: ghcr.io/spacechunks/matchmaking:${{ github.sha }}
