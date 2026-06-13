@@ -5,7 +5,7 @@ COPY go.mod go.sum ./
 COPY vendor .
 COPY .. .
 RUN mkdir bin
-RUN go build -mod vendor -o bin ./cmd/mm
+RUN go build -mod vendor -o bin/mm ./cmd/server
 
 FROM alpine:3.23
 RUN apk add --no-cache ca-certificates
