@@ -9,6 +9,8 @@ import (
 
 	"buf.build/go/protovalidate"
 	protovalidatemw "github.com/grpc-ecosystem/go-grpc-middleware/v2/interceptors/protovalidate"
+	chunkv1alpha1 "github.com/spacechunks/explorer/api/chunk/v1alpha1"
+	instancev1alpha1 "github.com/spacechunks/explorer/api/instance/v1alpha1"
 	mmv1alpha1 "github.com/spacechunks/matchmaking/api/v1alpha1"
 	"github.com/spacechunks/matchmaking/internal/matchmaking"
 	"google.golang.org/grpc"
@@ -32,8 +34,10 @@ func New(logger *slog.Logger, config Config, tickets *matchmaking.Store[matchmak
 
 type Config struct {
 	ListeAddr                            string
+	ControlPlaneAddr                     string
 	MatchInterval                        time.Duration
 	AllocateInstanceForPendingMatchAfter time.Duration
+	RemoveInactiveTicketsAfter           time.Duration
 }
 
 func (s Server) Run(ctx context.Context) error {
@@ -49,11 +53,19 @@ func (s Server) Run(ctx context.Context) error {
 		),
 	)
 
+	conn, err := grpc.NewClient(s.cfg.ControlPlaneAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		return fmt.Errorf("create grpc client: %w", err)
+	}
+
 	mm := matchmaking.NewFlavorMatchMaker(
 		s.logger.With("component", "matchmaker"),
 		s.cfg.MatchInterval,
 		s.cfg.AllocateInstanceForPendingMatchAfter,
+		s.cfg.RemoveInactiveTicketsAfter,
 		s.tickets,
+		chunkv1alpha1.NewChunkServiceClient(conn),
+		instancev1alpha1.NewInstanceServiceClient(conn),
 	)
 
 	go mm.Start(ctx)

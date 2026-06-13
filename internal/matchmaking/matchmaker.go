@@ -2,16 +2,24 @@ package matchmaking
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log/slog"
 	"slices"
 	"time"
 
 	"github.com/google/uuid"
+	chunkv1alpha1 "github.com/spacechunks/explorer/api/chunk/v1alpha1"
+	instancev1alpha1 "github.com/spacechunks/explorer/api/instance/v1alpha1"
 	"github.com/spacechunks/matchmaking/internal/gameserver"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
-type MatchMaker interface {
-}
+var (
+	errFlavorVersionNotFound   = fmt.Errorf("flavor version not found")
+	errNoFlavorVersionPlayable = fmt.Errorf("no flavor version playable")
+)
 
 type FlavorMatchMaker struct {
 	logger *slog.Logger
@@ -25,13 +33,20 @@ type FlavorMatchMaker struct {
 	pendingMatches map[string][]string
 
 	allocInstanceForPendingMatchAfter time.Duration
+	removeInactiveTicketsAfter        time.Duration
+
+	chunkClient chunkv1alpha1.ChunkServiceClient
+	insClient   instancev1alpha1.InstanceServiceClient
 }
 
 func NewFlavorMatchMaker(
 	logger *slog.Logger,
 	matchEvalInterval time.Duration,
 	allocInstanceForPendingMatchAfter time.Duration,
+	removeInactiveTicketsAfter time.Duration,
 	tickets *Store[Ticket],
+	chunkClient chunkv1alpha1.ChunkServiceClient,
+	insClient instancev1alpha1.InstanceServiceClient,
 ) *FlavorMatchMaker {
 	return &FlavorMatchMaker{
 		logger:                            logger,
@@ -40,8 +55,10 @@ func NewFlavorMatchMaker(
 		ticketPools:                       make(map[string]TicketPool),
 		matches:                           NewStore[Match](),
 		pendingMatches:                    make(map[string][]string),
-		alloc:                             &gameserver.MockAlloc{},
 		allocInstanceForPendingMatchAfter: allocInstanceForPendingMatchAfter,
+		removeInactiveTicketsAfter:        removeInactiveTicketsAfter,
+		chunkClient:                       chunkClient,
+		insClient:                         insClient,
 	}
 }
 
@@ -51,84 +68,25 @@ func (m FlavorMatchMaker) Start(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-m.ticker.C:
-			// TODO: fetch latest flavor version and flavor (for min/max player counts)
-			// let the previous matched players use the last flavor version
-
-			for flavor, pool := range m.ticketPools {
-				m.match(flavor, pool)
-			}
-
-			for _, match := range m.matches.View() {
-				m.logger.Info("match", "match_id", match.ID, "flavor", match.FlavorID, "tickets", len(match.Tickets))
-				var (
-					invalidated []Ticket
-					valid       []Ticket
-				)
-
-				// check if any tickets have been invalidated as of now. do not continue processing.
-				for _, t := range match.Tickets {
-					if tmp := m.tickets.Get(t.ID); tmp == nil {
-						m.logger.Info("invalidated ticket", "match_id", match.ID, "ticket", t.ID)
-						invalidated = append(invalidated, t)
+			for flavorID, pool := range m.ticketPools {
+				ver, err := m.findPlayableFlavorVersion(ctx, flavorID)
+				if err != nil {
+					m.logger.ErrorContext(ctx, "error finding playable flavor version", "err", err)
+					if errors.Is(err, errNoFlavorVersionPlayable) || errors.Is(err, errFlavorVersionNotFound) {
+						// tickets will be removed
+						for _, t := range pool.Tickets() {
+							m.logger.WarnContext(ctx, "ticket is non-playable", "ticket_id", t.ID, "err", err)
+							t.Status = TicketStatusNoPlayableFlavorVersion
+							m.tickets.Update(t)
+						}
 						continue
 					}
-					valid = append(valid, t)
 				}
 
-				if len(invalidated) > 0 {
-					for _, t := range valid {
-						t.MatchID = nil // make ticket be picked up by the pool again
-						m.tickets.Update(t)
-					}
-
-					m.logger.Info("match has invalidated tickets, removing match", "match_id", match)
-					m.matches.Delete(match.ID)
-					continue
-				}
-
-				// all tickets in our match are still valid
-
-				if match.Full {
-					m.logger.Info(
-						"creating instance and assignment",
-						"match_id", match.ID,
-					)
-
-					if err := m.AllocateInstanceAndAssign(ctx, match); err != nil {
-						m.logger.ErrorContext(
-							ctx,
-							"failed to allocate instance",
-							"match_id", match.ID,
-							"err", err,
-						)
-					}
-
-					continue
-				}
-
-				if time.Now().After(match.CreatedAt.Add(m.allocInstanceForPendingMatchAfter)) {
-					m.logger.Info("pending match created")
-					if err := m.AllocateInstanceAndAssign(ctx, match); err != nil {
-						m.logger.ErrorContext(
-							ctx,
-							"failed to allocate instance",
-							"match_id", match.ID,
-							"err", err,
-						)
-					}
-					continue
-				}
-
-				containsPending := slices.ContainsFunc(m.pendingMatches[match.FlavorID], func(s string) bool {
-					return s == match.ID
-				})
-
-				if containsPending {
-					continue
-				}
-
-				m.pendingMatches[match.FlavorID] = append(m.pendingMatches[match.FlavorID], match.ID)
+				m.generateMatches(flavorID, ver, pool)
 			}
+
+			m.checkAndDeployMatches(ctx)
 
 			// we delete and recreate all ticket pools in order to add new tickets
 			// and put tickets from invalidated matches back into their pools.
@@ -140,6 +98,17 @@ func (m FlavorMatchMaker) Start(ctx context.Context) {
 			}
 
 			for _, t := range m.tickets.View() {
+				eligibleForRemoval := t.Assignment != nil ||
+					t.Status == TicketStatusNoPlayableFlavorVersion ||
+					t.Status == TicketStatusInactive
+
+				// perform this check before creating the ticket pool, so we don't create pools
+				// for flavors that potentially do not have any tickets.
+				if eligibleForRemoval && time.Now().After(t.CreatedAt.Add(m.removeInactiveTicketsAfter)) {
+					m.tickets.Delete(t.ID)
+					continue
+				}
+
 				if _, ok := m.ticketPools[t.FlavorID]; !ok {
 					m.ticketPools[t.FlavorID] = TicketPool{
 						tickets: make(map[string]Ticket),
@@ -152,7 +121,7 @@ func (m FlavorMatchMaker) Start(ctx context.Context) {
 	}
 }
 
-func (m FlavorMatchMaker) match(flavor string, pool TicketPool) {
+func (m FlavorMatchMaker) generateMatches(flavorID string, version *chunkv1alpha1.FlavorVersion, pool TicketPool) {
 	if len(pool.Tickets()) == 0 {
 		return
 	}
@@ -163,9 +132,9 @@ func (m FlavorMatchMaker) match(flavor string, pool TicketPool) {
 	// if players leave or join while instance creation => invalidate match and put tickets into pool again
 	// whats the worst thing that could happen with this approach => player leaves/joins party during server creation
 	// => match gets invalidated all tickets, go back into pool, server will still be created and is a zombie.
-	logger := m.logger.With("flavor_id", flavor)
+	logger := m.logger.With("flavor_id", flavorID)
 
-	pending := m.pendingMatches[flavor]
+	pending := m.pendingMatches[flavorID]
 	for _, matchID := range pending {
 		match := m.matches.Get(matchID)
 		if match == nil {
@@ -173,7 +142,10 @@ func (m FlavorMatchMaker) match(flavor string, pool TicketPool) {
 			continue // should not happen
 		}
 
-		matched := pool.FindTickets(10 - match.PlayerCount())
+		var (
+			maxPlayers = match.FlavorVersion.MaxPlayers
+			matched    = pool.FindTickets(maxPlayers - match.PlayerCount())
+		)
 
 		for _, t := range matched {
 			t.MatchID = &match.ID
@@ -183,9 +155,9 @@ func (m FlavorMatchMaker) match(flavor string, pool TicketPool) {
 		pool.RemoveAll(matched)
 		match.Tickets = append(match.Tickets, matched...)
 
-		if match.PlayerCount() == 10 {
+		if match.PlayerCount() == maxPlayers {
 			match.Full = true
-			slices.DeleteFunc(m.pendingMatches[flavor], func(s string) bool {
+			slices.DeleteFunc(m.pendingMatches[flavorID], func(s string) bool {
 				return s == match.ID
 			})
 		}
@@ -195,7 +167,7 @@ func (m FlavorMatchMaker) match(flavor string, pool TicketPool) {
 
 	matched := pool.FindTickets(10)
 
-	if matched.PlayerCount() < 3 {
+	if matched.PlayerCount() < version.MinPlayers {
 		logger.Info(
 			"sum of matched players below minimum required",
 			"match_len", matched.PlayerCount(),
@@ -206,14 +178,24 @@ func (m FlavorMatchMaker) match(flavor string, pool TicketPool) {
 	defer pool.RemoveAll(matched)
 
 	match := Match{
-		ID:              uuid.NewString(),
-		Tickets:         matched,
-		FlavorID:        flavor,
-		CreatedAt:       time.Now(),
-		FlavorVersionID: "",
+		ID:        uuid.NewString(),
+		Tickets:   matched,
+		FlavorID:  flavorID,
+		CreatedAt: time.Now(),
+
+		// assigning the flavor version to the match and not to the tickets
+		// ensures that if there happen to be min/max player changes while
+		// matchmaking, the previously created match can still operate on
+		// correct values.
+		//
+		// if we didn't store the flavor version, it could happen that while
+		// searching for other players the min/max players requirements change.
+		// players could end up in a match where they would exceed the max
+		// player count or be too few to actually start the game.
+		FlavorVersion: version,
 	}
 
-	if match.PlayerCount() == 10 {
+	if match.PlayerCount() == version.MaxPlayers {
 		match.Full = true
 	}
 
@@ -225,15 +207,93 @@ func (m FlavorMatchMaker) match(flavor string, pool TicketPool) {
 	m.matches.Add(match)
 }
 
+func (m FlavorMatchMaker) checkAndDeployMatches(ctx context.Context) {
+	for _, match := range m.matches.View() {
+		m.logger.Info("match", "match_id", match.ID, "flavor", match.FlavorID, "tickets", len(match.Tickets))
+		var (
+			invalidated []Ticket
+			valid       []Ticket
+		)
+
+		// check if any tickets have been invalidated as of now. do not continue processing.
+		for _, t := range match.Tickets {
+			if tmp := m.tickets.Get(t.ID); tmp == nil {
+				m.logger.Info("invalidated ticket", "match_id", match.ID, "ticket", t.ID)
+				invalidated = append(invalidated, t)
+				continue
+			}
+			valid = append(valid, t)
+		}
+
+		if len(invalidated) > 0 {
+			for _, t := range valid {
+				t.MatchID = nil    // make ticket be picked up by the pool again
+				t.Assignment = nil // clear the assignment if there is any
+				m.tickets.Update(t)
+			}
+
+			m.logger.Info("match has invalidated tickets, removing match", "match_id", match)
+			m.matches.Delete(match.ID)
+			continue
+		}
+
+		// all tickets in our match are still valid
+
+		if match.Full {
+			m.logger.Info(
+				"creating instance and assignment",
+				"match_id", match.ID,
+			)
+
+			if err := m.AllocateInstanceAndAssign(ctx, match); err != nil {
+				m.logger.ErrorContext(
+					ctx,
+					"failed to allocate instance",
+					"match_id", match.ID,
+					"err", err,
+				)
+			}
+
+			continue
+		}
+
+		if time.Now().After(match.CreatedAt.Add(m.allocInstanceForPendingMatchAfter)) {
+			m.logger.Info("pending match created")
+			if err := m.AllocateInstanceAndAssign(ctx, match); err != nil {
+				m.logger.ErrorContext(
+					ctx,
+					"failed to allocate instance",
+					"match_id", match.ID,
+					"err", err,
+				)
+			}
+			continue
+		}
+
+		containsPending := slices.ContainsFunc(m.pendingMatches[match.FlavorID], func(s string) bool {
+			return s == match.ID
+		})
+
+		if containsPending {
+			continue
+		}
+
+		m.pendingMatches[match.FlavorID] = append(m.pendingMatches[match.FlavorID], match.ID)
+	}
+}
+
 func (m FlavorMatchMaker) AllocateInstanceAndAssign(ctx context.Context, match Match) error {
-	insID, err := m.alloc.AllocateInstance(ctx)
+	resp, err := m.insClient.RunFlavorVersion(ctx, &instancev1alpha1.RunFlavorVersionRequest{
+		FlavorVersionId: match.FlavorVersion.Id,
+		OrderedBy:       "", // provide none for now
+	})
 	if err != nil {
 		return err
 	}
 
 	for _, t := range match.Tickets {
 		t.Assignment = &Assignment{
-			InstanceID: insID,
+			InstanceID: resp.Instance.Id,
 		}
 		m.tickets.Update(t)
 	}
@@ -249,4 +309,25 @@ func (m FlavorMatchMaker) AllocateInstanceAndAssign(ctx context.Context, match M
 
 func (m FlavorMatchMaker) Stop() {
 	m.ticker.Stop()
+}
+
+func (m FlavorMatchMaker) findPlayableFlavorVersion(ctx context.Context, flavorID string) (*chunkv1alpha1.FlavorVersion, error) {
+	resp, err := m.chunkClient.GetFlavor(ctx, &chunkv1alpha1.GetFlavorRequest{
+		Id: flavorID,
+	})
+
+	if err != nil {
+		if st, ok := status.FromError(err); ok && st.Code() == codes.NotFound {
+			return nil, errFlavorVersionNotFound
+		}
+		return nil, fmt.Errorf("get flavor: %w", err)
+	}
+
+	for _, v := range resp.Flavor.Versions {
+		if v.BuildStatus == chunkv1alpha1.BuildStatus_COMPLETED {
+			return v, nil
+		}
+	}
+
+	return nil, errNoFlavorVersionPlayable
 }

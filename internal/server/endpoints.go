@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	mmv1alpha1 "github.com/spacechunks/matchmaking/api/v1alpha1"
@@ -24,8 +25,8 @@ func (s Server) GetTicket(
 		Ticket: &mmv1alpha1.Ticket{
 			Id:          t.ID,
 			FlavorId:    t.FlavorID,
-			PlayerCount: uint32(t.PlayerCount),
-			Active:      t.Active,
+			PlayerCount: t.PlayerCount,
+			Status:      mmv1alpha1.TicketStatus(t.Status),
 		},
 	}
 
@@ -65,8 +66,9 @@ func (s Server) CreateTicket(
 
 	t := matchmaking.Ticket{
 		ID:          id.String(),
-		PlayerCount: int(req.PlayerCount),
+		PlayerCount: req.PlayerCount,
 		FlavorID:    req.FlavorId,
+		CreatedAt:   time.Now(),
 	}
 
 	s.tickets.Add(t)
@@ -75,7 +77,8 @@ func (s Server) CreateTicket(
 		Ticket: &mmv1alpha1.Ticket{
 			Id:          t.ID,
 			FlavorId:    t.FlavorID,
-			PlayerCount: uint32(t.PlayerCount),
+			PlayerCount: t.PlayerCount,
+			Status:      matchmaking.TicketStatusInactive,
 		},
 	}, nil
 
@@ -90,7 +93,14 @@ func (s Server) ActivateTicket(
 		return nil, status.Error(codes.NotFound, "ticket not found")
 	}
 
-	t.Active = true
+	// you should not be able to set the ticket status to active
+	// if the status is NO_PLAYABLE_FLAVOR_VERSION. so only inactive
+	// tickets can be activated.
+	if t.Status != matchmaking.TicketStatusInactive {
+		return nil, status.Error(codes.FailedPrecondition, "ticket is already active or has been invalidated")
+	}
+
+	t.Status = matchmaking.TicketStatusActive
 	s.tickets.Update(*t)
 
 	return &mmv1alpha1.ActivateTicketResponse{}, nil

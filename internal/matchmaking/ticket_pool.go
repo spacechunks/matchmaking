@@ -14,7 +14,7 @@ func (p TicketPool) Add(ticket Ticket) {
 		return
 	}
 
-	if ticket.Assignment != nil || ticket.MatchID != nil || !ticket.Active {
+	if ticket.Assignment != nil || ticket.MatchID != nil || ticket.Status != TicketStatusActive {
 		return
 	}
 
@@ -32,7 +32,7 @@ func (p TicketPool) Tickets() []Ticket {
 }
 
 // FindTickets returns the first combination of tickets that sums to exactly `target`. Cooked by AI.
-func (p TicketPool) FindTickets(max int) TicketList {
+func (p TicketPool) FindTickets(max uint32) TicketList {
 	n := len(p.tickets)
 	if n == 0 {
 		return nil
@@ -64,7 +64,7 @@ func (p TicketPool) FindTickets(max int) TicketList {
 
 	// find the best (highest) achievable sum
 	best := 0
-	for s := max; s >= 0; s-- {
+	for s := int(max); s >= 0; s-- {
 		if dp[s] {
 			best = s
 			break
@@ -75,7 +75,7 @@ func (p TicketPool) FindTickets(max int) TicketList {
 	for s := best; s > 0; {
 		idx := from[s]
 		chosen[idx] = true
-		s -= ticketSlice[idx].PlayerCount
+		s -= int(ticketSlice[idx].PlayerCount)
 	}
 
 	var result []Ticket
