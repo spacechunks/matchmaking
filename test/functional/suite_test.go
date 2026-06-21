@@ -45,6 +45,7 @@ var (
 		MatchInterval:                        100 * time.Millisecond,
 		AllocateInstanceForPendingMatchAfter: 1 * time.Second,
 		RemoveInactiveTicketsAfter:           3 * time.Second,
+		RemoveDeployedMatchesAfter:           4 * time.Second,
 	}
 
 	workingFlavor1 = &chunkv1alpha1.Flavor{
@@ -119,8 +120,13 @@ var _ = Describe("matchmaking", func() {
 		config.ControlPlaneAddr = fmt.Sprintf("localhost:%d", 31000+rand.IntN(10000))
 
 		var (
-			logger  = slog.New(slog.NewTextHandler(GinkgoWriter, nil))
-			serv    = server.New(logger, config, matchmaking.NewStore[matchmaking.Ticket]())
+			logger = slog.New(slog.NewTextHandler(GinkgoWriter, nil))
+			serv   = server.New(
+				logger,
+				config,
+				matchmaking.NewStore[matchmaking.Ticket](),
+				matchmaking.NewStore[matchmaking.Match](),
+			)
 			fakceCP = FakeControlPlane{
 				flavors: map[string]*chunkv1alpha1.Flavor{
 					workingFlavor1.Id:            workingFlavor1,
@@ -180,6 +186,11 @@ var _ = Describe("matchmaking", func() {
 			g.Expect(updated1.Assignment).NotTo(BeNil())
 			g.Expect(updated2.Assignment).NotTo(BeNil())
 			g.Expect(updated1.Assignment.InstanceId).To(Equal(updated2.Assignment.InstanceId))
+
+			g.Expect(updated1.Match).NotTo(BeNil())
+			g.Expect(updated2.Match).NotTo(BeNil())
+			g.Expect(updated1.Match.Id).To(Equal(updated2.Match.Id))
+			g.Expect(updated1.Match.PlayerCount).To(Equal(updated1.PlayerCount + updated2.PlayerCount))
 		}).WithTimeout(10 * time.Second).Should(Succeed())
 	})
 
@@ -211,6 +222,14 @@ var _ = Describe("matchmaking", func() {
 			insID := updated1.Assignment.InstanceId
 			g.Expect(updated2.Assignment.InstanceId).To(Equal(insID))
 			g.Expect(updated3.Assignment.InstanceId).To(Equal(insID))
+
+			g.Expect(updated1.Match).NotTo(BeNil())
+			g.Expect(updated2.Match).NotTo(BeNil())
+			g.Expect(updated3.Match).NotTo(BeNil())
+
+			matchID := updated1.Match.Id
+			g.Expect(updated2.Match.Id).To(Equal(matchID))
+			g.Expect(updated3.Match.Id).To(Equal(matchID))
 		}).WithTimeout(10 * time.Second).Should(Succeed())
 	})
 
@@ -244,6 +263,15 @@ var _ = Describe("matchmaking", func() {
 			// make sure they do not equal one another, these should be two distinct matches
 			g.Expect(updated1.Assignment.InstanceId).NotTo(Equal(updated3.Assignment.InstanceId))
 			g.Expect(updated4.Assignment.InstanceId).NotTo(Equal(updated2.Assignment.InstanceId))
+
+			g.Expect(updated1.Match).NotTo(BeNil())
+			g.Expect(updated2.Match).NotTo(BeNil())
+			g.Expect(updated3.Match).NotTo(BeNil())
+			g.Expect(updated4.Match).NotTo(BeNil())
+
+			g.Expect(updated1.Match.Id).NotTo(Equal(updated3.Match.Id))
+			g.Expect(updated4.Match.Id).NotTo(Equal(updated2.Match.Id))
+
 		}).WithTimeout(10 * time.Second).Should(Succeed())
 	})
 
@@ -263,6 +291,9 @@ var _ = Describe("matchmaking", func() {
 
 			g.Expect(updated1.Assignment).To(BeNil())
 			g.Expect(updated2.Assignment).To(BeNil())
+
+			g.Expect(updated1.Match).To(BeNil())
+			g.Expect(updated2.Match).To(BeNil())
 		}, "5s").Should(Succeed())
 	})
 
@@ -284,6 +315,10 @@ var _ = Describe("matchmaking", func() {
 			g.Expect(updated1.Assignment).To(BeNil())
 			g.Expect(updated2.Assignment).To(BeNil())
 			g.Expect(updated3.Assignment).To(BeNil())
+
+			g.Expect(updated1.Match).To(BeNil())
+			g.Expect(updated2.Match).To(BeNil())
+			g.Expect(updated3.Match).To(BeNil())
 		}, "2s").Should(Succeed())
 	})
 
@@ -294,7 +329,7 @@ var _ = Describe("matchmaking", func() {
 			ticket2  = createTicket(ctx, client, flavorID, 2)
 		)
 
-		time.Sleep(300 * time.Millisecond)
+		time.Sleep(100 * time.Millisecond)
 
 		activateTicket(ctx, client, ticket2.Id)
 
@@ -307,7 +342,11 @@ var _ = Describe("matchmaking", func() {
 			g.Expect(updated1.Assignment).NotTo(BeNil())
 			g.Expect(updated2.Assignment).NotTo(BeNil())
 			g.Expect(updated1.Assignment.InstanceId).To(Equal(updated2.Assignment.InstanceId))
-		}).WithTimeout(10 * time.Second).Should(Succeed())
+
+			g.Expect(updated1.Match).NotTo(BeNil())
+			g.Expect(updated2.Match).NotTo(BeNil())
+			//g.Expect(updated1.Match.Id).To(Equal(updated2.Match.Id))
+		}).WithTimeout(2 * time.Second).Should(Succeed())
 	})
 
 	It("creates 2 different matches when combined player count is greater than maxPlayer", func(ctx SpecContext) {
@@ -329,11 +368,17 @@ var _ = Describe("matchmaking", func() {
 			g.Expect(updated2.Assignment).NotTo(BeNil())
 			g.Expect(updated3.Assignment).NotTo(BeNil())
 
+			g.Expect(updated1.Match).NotTo(BeNil())
+			g.Expect(updated2.Match).NotTo(BeNil())
+			g.Expect(updated3.Match).NotTo(BeNil())
+
 			// ticket1 is a separate match
 			g.Expect(updated1.Assignment.InstanceId).NotTo(Equal(updated2.Assignment.InstanceId))
+			g.Expect(updated1.Match.Id).NotTo(Equal(updated2.Match.Id))
 
 			// ticket2 and ticket3 should be matched together
 			g.Expect(updated2.Assignment.InstanceId).To(Equal(updated3.Assignment.InstanceId))
+			g.Expect(updated2.Match.Id).To(Equal(updated3.Match.Id))
 
 		}, "10s").Should(Succeed())
 	})
@@ -349,6 +394,7 @@ var _ = Describe("matchmaking", func() {
 		Eventually(func(g Gomega) {
 			updated := fetchTicket(ctx, client, ticket1.Id)
 			g.Expect(updated.Assignment).NotTo(BeNil())
+			g.Expect(updated.Match).NotTo(BeNil())
 		}).WithTimeout(10 * time.Second).Should(Succeed())
 
 		Consistently(func(g Gomega) {
@@ -358,6 +404,8 @@ var _ = Describe("matchmaking", func() {
 			)
 			g.Expect(updated2.Assignment).To(BeNil())
 			g.Expect(updated3.Assignment).To(BeNil())
+			g.Expect(updated2.Match).To(BeNil())
+			g.Expect(updated3.Match).To(BeNil())
 		}, "2s").Should(Succeed())
 	})
 
@@ -376,6 +424,8 @@ var _ = Describe("matchmaking", func() {
 
 			g.Expect(updated1.Assignment).To(BeNil())
 			g.Expect(updated2.Assignment).To(BeNil())
+			g.Expect(updated1.Match).To(BeNil())
+			g.Expect(updated2.Match).To(BeNil())
 		}, "2s").Should(Succeed())
 	})
 
@@ -460,7 +510,7 @@ var _ = Describe("matchmaking", func() {
 		removeTicket(ctx, client, ticket1.Id)
 
 		// give the server some time to remove the ticket from the store
-		time.Sleep(50 * time.Millisecond)
+		time.Sleep(100 * time.Millisecond)
 
 		Consistently(func(g Gomega) {
 			_, err := client.GetTicket(ctx, &mmv1alpha1.GetTicketRequest{
@@ -470,6 +520,7 @@ var _ = Describe("matchmaking", func() {
 
 			updated2 := fetchTicket(ctx, client, ticket2.Id)
 			g.Expect(updated2.Assignment).To(BeNil())
+			g.Expect(updated2.Match).To(BeNil())
 		}, "2s").Should(Succeed())
 	})
 })

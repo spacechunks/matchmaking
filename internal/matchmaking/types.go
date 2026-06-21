@@ -53,13 +53,14 @@ type Assignment struct {
 }
 
 type Match struct {
-	ID            string
-	Tickets       TicketList
-	Full          bool
-	ChunkID       string
-	FlavorID      string
-	FlavorVersion *chunkv1alpha1.FlavorVersion
-	CreatedAt     time.Time
+	ID                  string
+	Tickets             TicketList
+	Full                bool
+	ChunkID             string
+	FlavorID            string
+	FlavorVersion       *chunkv1alpha1.FlavorVersion
+	CreatedAt           time.Time
+	InstanceAllocatedAt *time.Time
 }
 
 func (m Match) GetID() string {

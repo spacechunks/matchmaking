@@ -35,6 +35,7 @@ func main() {
 		ctx, cancel = context.WithCancel(context.Background())
 		logger      = slog.New(slog.NewJSONHandler(os.Stdout, nil))
 		tickets     = matchmaking.NewStore[matchmaking.Ticket]()
+		matches     = matchmaking.NewStore[matchmaking.Match]()
 	)
 
 	viper.SetEnvPrefix("MM")
@@ -46,6 +47,7 @@ func main() {
 	viper.SetDefault("match_interval", "1s")
 	viper.SetDefault("allocate_instance_for_pending_match_after", "15s")
 	viper.SetDefault("remove_inactive_tickets_after", "1m")
+	viper.SetDefault("remove_deployed_matches_after", "2m")
 
 	var cfg server.Config
 	if err := viper.Unmarshal(&cfg); err != nil {
@@ -53,7 +55,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	serv := server.New(logger, cfg, tickets)
+	serv := server.New(logger, cfg, tickets, matches)
 
 	go func() {
 		c := make(chan os.Signal, 1)

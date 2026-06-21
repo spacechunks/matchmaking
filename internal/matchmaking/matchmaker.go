@@ -50,6 +50,7 @@ type FlavorMatchMaker struct {
 
 	allocInstanceForPendingMatchAfter time.Duration
 	removeInactiveTicketsAfter        time.Duration
+	removeDeployedMatchesAfter        time.Duration
 
 	chunkClient chunkv1alpha1.ChunkServiceClient
 	insClient   instancev1alpha1.InstanceServiceClient
@@ -60,7 +61,9 @@ func NewFlavorMatchMaker(
 	matchEvalInterval time.Duration,
 	allocInstanceForPendingMatchAfter time.Duration,
 	removeInactiveTicketsAfter time.Duration,
+	removeDeployedMatchesAfter time.Duration,
 	tickets *Store[Ticket],
+	matches *Store[Match],
 	chunkClient chunkv1alpha1.ChunkServiceClient,
 	insClient instancev1alpha1.InstanceServiceClient,
 ) *FlavorMatchMaker {
@@ -69,10 +72,11 @@ func NewFlavorMatchMaker(
 		ticker:                            time.NewTicker(matchEvalInterval),
 		tickets:                           tickets,
 		ticketPools:                       make(map[string]TicketPool),
-		matches:                           NewStore[Match](),
+		matches:                           matches,
 		pendingMatches:                    make(map[string][]string),
 		allocInstanceForPendingMatchAfter: allocInstanceForPendingMatchAfter,
 		removeInactiveTicketsAfter:        removeInactiveTicketsAfter,
+		removeDeployedMatchesAfter:        removeDeployedMatchesAfter,
 		chunkClient:                       chunkClient,
 		insClient:                         insClient,
 	}
@@ -157,9 +161,9 @@ func (m FlavorMatchMaker) generateMatches(flavorID string, version *chunkv1alpha
 			matched    = pool.FindTickets(maxPlayers - match.PlayerCount())
 		)
 
-		for _, t := range matched {
-			t.MatchID = &match.ID
-			m.tickets.Update(t)
+		for i := range matched {
+			matched[i].MatchID = &match.ID
+			m.tickets.Update(matched[i])
 		}
 
 		pool.RemoveAll(matched)
@@ -209,9 +213,9 @@ func (m FlavorMatchMaker) generateMatches(flavorID string, version *chunkv1alpha
 		match.Full = true
 	}
 
-	for _, t := range match.Tickets {
-		t.MatchID = &match.ID
-		m.tickets.Update(t)
+	for i := range match.Tickets {
+		match.Tickets[i].MatchID = &match.ID
+		m.tickets.Update(match.Tickets[i])
 	}
 
 	m.matches.Add(match)
@@ -227,6 +231,12 @@ func (m FlavorMatchMaker) checkAndDeployMatches(ctx context.Context) {
 		)
 
 		logger.Info("found match")
+
+		if time.Now().After(match.CreatedAt.Add(m.removeDeployedMatchesAfter)) {
+			logger.InfoContext(ctx, "removing deployed match")
+			m.matches.Delete(match.ID)
+			continue
+		}
 
 		var (
 			invalidated []Ticket
@@ -267,7 +277,7 @@ func (m FlavorMatchMaker) checkAndDeployMatches(ctx context.Context) {
 			continue
 		}
 
-		if time.Now().After(match.CreatedAt.Add(m.allocInstanceForPendingMatchAfter)) {
+		if time.Now().After(match.CreatedAt.Add(m.allocInstanceForPendingMatchAfter)) && match.InstanceAllocatedAt == nil {
 			m.logger.Info("pending match created")
 			if err := m.AllocateInstanceAndAssign(ctx, match); err != nil {
 				logger.ErrorContext(ctx, "failed to allocate instance", "err", err)
@@ -308,7 +318,8 @@ func (m FlavorMatchMaker) AllocateInstanceAndAssign(ctx context.Context, match M
 		return match.ID == matchID
 	})
 
-	m.matches.Delete(match.ID)
+	match.InstanceAllocatedAt = new(time.Now())
+	m.matches.Update(match)
 	return nil
 }
 

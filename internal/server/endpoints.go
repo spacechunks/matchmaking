@@ -34,23 +34,32 @@ func (s Server) GetTicket(
 	_ context.Context,
 	req *mmv1alpha1.GetTicketRequest,
 ) (*mmv1alpha1.GetTicketResponse, error) {
-	t := s.tickets.Get(req.TicketId)
-	if t == nil {
+	ticket := s.tickets.Get(req.TicketId)
+	if ticket == nil {
 		return nil, status.Error(codes.NotFound, "ticket not found")
 	}
 
 	ret := &mmv1alpha1.GetTicketResponse{
 		Ticket: &mmv1alpha1.Ticket{
-			Id:          t.ID,
-			FlavorId:    t.FlavorID,
-			PlayerCount: t.PlayerCount,
-			Status:      mmv1alpha1.TicketStatus(t.Status),
+			Id:          ticket.ID,
+			FlavorId:    ticket.FlavorID,
+			PlayerCount: ticket.PlayerCount,
+			Status:      mmv1alpha1.TicketStatus(ticket.Status),
 		},
 	}
 
-	if t.Assignment != nil {
+	if ticket.Assignment != nil {
 		ret.Ticket.Assignment = &mmv1alpha1.Assignment{
-			InstanceId: t.Assignment.InstanceID,
+			InstanceId: ticket.Assignment.InstanceID,
+		}
+	}
+
+	if ticket.MatchID != nil {
+		if m := s.matches.Get(*ticket.MatchID); m != nil {
+			ret.Ticket.Match = &mmv1alpha1.Match{
+				Id:          m.ID,
+				PlayerCount: m.PlayerCount(),
+			}
 		}
 	}
 
