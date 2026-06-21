@@ -39,12 +39,18 @@ enum TicketStatus {
     NO_PLAYABLE_FLAVOR_VERSION = 2;
 }
 
+message Match {
+    string id = 1;
+    uint32 player_count = 2;
+}
+
 message Ticket {
     string id = 1;
     string flavor_id = 2;
     uint32 player_count = 3;
     TicketStatus status = 4;
     Assignment assignment = 5;
+    Match match = 6;
 }
 
 message Assignment {

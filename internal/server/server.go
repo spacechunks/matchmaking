@@ -44,13 +44,20 @@ type Server struct {
 	logger  *slog.Logger
 	cfg     Config
 	tickets *matchmaking.Store[matchmaking.Ticket]
+	matches *matchmaking.Store[matchmaking.Match]
 }
 
-func New(logger *slog.Logger, config Config, tickets *matchmaking.Store[matchmaking.Ticket]) *Server {
+func New(
+	logger *slog.Logger,
+	config Config,
+	tickets *matchmaking.Store[matchmaking.Ticket],
+	matches *matchmaking.Store[matchmaking.Match],
+) *Server {
 	return &Server{
 		logger:  logger,
 		cfg:     config,
 		tickets: tickets,
+		matches: matches,
 	}
 }
 
@@ -62,6 +69,7 @@ type Config struct {
 	MatchInterval                        time.Duration `mapstructure:"match_interval"`
 	AllocateInstanceForPendingMatchAfter time.Duration `mapstructure:"allocate_instance_for_pending_match_after"`
 	RemoveInactiveTicketsAfter           time.Duration `mapstructure:"remove_inactive_tickets_after"`
+	RemoveDeployedMatchesAfter           time.Duration `mapstructure:"remove_deployed_matches_after"`
 }
 
 func (s Server) Run(ctx context.Context) error {
@@ -118,7 +126,9 @@ func (s Server) Run(ctx context.Context) error {
 		s.cfg.MatchInterval,
 		s.cfg.AllocateInstanceForPendingMatchAfter,
 		s.cfg.RemoveInactiveTicketsAfter,
+		s.cfg.RemoveDeployedMatchesAfter,
 		s.tickets,
+		s.matches,
 		chunkv1alpha1.NewChunkServiceClient(conn),
 		instancev1alpha1.NewInstanceServiceClient(conn),
 	)
