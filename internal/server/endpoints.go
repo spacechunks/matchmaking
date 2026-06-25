@@ -57,8 +57,10 @@ func (s Server) GetTicket(
 	if ticket.MatchID != nil {
 		if m := s.matches.Get(*ticket.MatchID); m != nil {
 			ret.Ticket.Match = &mmv1alpha1.Match{
-				Id:          m.ID,
-				PlayerCount: m.PlayerCount(),
+				Id:              m.ID,
+				PlayerCount:     m.PlayerCount(),
+				FlavorVersionId: m.FlavorVersion.Id,
+				MaxPlayers:      m.FlavorVersion.MaxPlayers,
 			}
 		}
 	}

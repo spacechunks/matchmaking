@@ -42,6 +42,8 @@ enum TicketStatus {
 message Match {
     string id = 1;
     uint32 player_count = 2;
+    string flavor_version_id = 3;
+    uint32 maxPlayers = 4;
 }
 
 message Ticket {
