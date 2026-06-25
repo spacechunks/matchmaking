@@ -190,7 +190,9 @@ var _ = Describe("matchmaking", func() {
 			g.Expect(updated1.Match).NotTo(BeNil())
 			g.Expect(updated2.Match).NotTo(BeNil())
 			g.Expect(updated1.Match.Id).To(Equal(updated2.Match.Id))
+
 			g.Expect(updated1.Match.PlayerCount).To(Equal(updated1.PlayerCount + updated2.PlayerCount))
+			g.Expect(updated1.Match.MaxPlayers).To(Equal(workingFlavor1.Versions[1].MaxPlayers))
 		}).WithTimeout(10 * time.Second).Should(Succeed())
 	})
 
