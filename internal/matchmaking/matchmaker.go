@@ -261,6 +261,9 @@ func (m FlavorMatchMaker) checkAndDeployMatches(ctx context.Context) {
 			}
 
 			logger.Info("match has invalidated tickets, removing match", "match_id", match)
+			m.pendingMatches[match.FlavorID] = slices.DeleteFunc(m.pendingMatches[match.FlavorID], func(s string) bool {
+				return s == match.ID
+			})
 			m.matches.Delete(match.ID)
 			continue
 		}
